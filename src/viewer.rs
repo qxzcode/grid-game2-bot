@@ -1,12 +1,10 @@
 pub mod game;
 mod util;
 
-use std::iter;
-
 use eframe::egui;
 use eframe::egui::{Color32, Pos2, Rect, Rounding, Stroke};
 use egui::epaint::QuadraticBezierShape;
-use egui::{vec2, Vec2};
+use egui::{pos2, vec2, Shape, Vec2};
 use game::GRID_RADIUS;
 use hex2d::{Coordinate, Direction, Spacing, Spin};
 use util::transforms::Transform;
@@ -45,6 +43,8 @@ struct GridGameViewer {
     frames: Vec<()>,
     current_frame: usize,
     pointer_pos: String,
+    zoom: f32,
+    camera: Pos2,
 }
 
 impl Default for GridGameViewer {
@@ -53,6 +53,8 @@ impl Default for GridGameViewer {
             frames: vec![()],
             current_frame: 0,
             pointer_pos: "".to_string(),
+            zoom: 1.0,
+            camera: pos2(0.0, 0.0),
         }
     }
 }
@@ -63,20 +65,47 @@ impl GridGameViewer {
     }
 
     fn paint_game(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        let origin = Coordinate::new(0, 0);
+
         let rect = ui.max_rect();
         let world_to_screen = Transform::new_letterboxed(
-            Pos2::new(-GRID_WIDTH / 2.0, GRID_HEIGHT / 2.0),
-            Pos2::new(GRID_WIDTH / 2.0, -GRID_HEIGHT / 2.0),
+            Pos2::new(
+                -GRID_WIDTH / 2.0 / self.zoom + self.camera.x,
+                GRID_HEIGHT / 2.0 / self.zoom + self.camera.y,
+            ),
+            Pos2::new(
+                GRID_WIDTH / 2.0 / self.zoom + self.camera.x,
+                -GRID_HEIGHT / 2.0 / self.zoom + self.camera.y,
+            ),
             Pos2::new(rect.left(), rect.top()),
             Pos2::new(rect.right(), rect.bottom()),
         );
         let painter = ui.painter_at(rect);
 
+        ctx.input(|i| {
+            self.zoom *= (i.scroll_delta.y / 500.0).exp();
+            if i.pointer.is_decidedly_dragging() {
+                let px_scale = world_to_screen.map_dist(1.0);
+                self.camera.x -= i.pointer.delta().x / px_scale;
+                self.camera.y += i.pointer.delta().y / px_scale;
+            }
+        });
+        ctx.request_repaint();
+
         self.pointer_pos = match ctx.pointer_latest_pos() {
             None => "".to_string(),
             Some(pos) => {
                 let pos = world_to_screen.inverse().map_point(pos);
-                format!("({:.1}, {:.1})", pos.x, pos.y)
+                let tile: Coordinate<i32> =
+                    Coordinate::from_pixel(pos.x, pos.y, Spacing::PointyTop(1.0));
+                format!(
+                    "({:.1}, {:.1}) Hexagon: ({}, {}, r={})",
+                    pos.x,
+                    pos.y,
+                    tile.x,
+                    tile.y,
+                    tile.distance(origin),
+                )
             }
         };
 
@@ -93,29 +122,29 @@ impl GridGameViewer {
 
         // let game = self.frames[self.current_frame];
 
+        let get_hex_center_corners = |tile: Coordinate| {
+            let tile_center: Pos2 = tile.to_pixel(Spacing::PointyTop(1.0)).into();
+            (
+                tile_center,
+                HEXAGON_CORNERS.map(|p| world_to_screen.map_point(tile_center + p)),
+            )
+        };
+
         // TODO draw game
-        let origin = Coordinate::new(0, 0);
         for r in 0..=GRID_RADIUS {
             let ring = origin.ring_iter(r as i32, Spin::CW(Direction::XY));
 
             for tile in ring {
-                let tile_center: Pos2 = tile.to_pixel(Spacing::PointyTop(1.0)).into();
-                for (&p1, &p2) in iter::zip(&HEXAGON_CORNERS, &HEXAGON_CORNERS[1..]) {
-                    painter.line_segment(
-                        [
-                            world_to_screen.map_point(tile_center + p1),
-                            world_to_screen.map_point(tile_center + p2),
-                        ],
-                        Stroke::new(
-                            1.0,
-                            if r != GRID_RADIUS {
-                                Color32::from_gray(100)
-                            } else {
-                                Color32::from_rgb(0, 100, 0)
-                            },
-                        ),
-                    );
-                }
+                let (_, tile_corners) = get_hex_center_corners(tile);
+                painter.add(Shape::convex_polygon(
+                    tile_corners.to_vec(),
+                    match r {
+                        0 => Color32::from_rgba_unmultiplied(255, 128, 0, 15),
+                        GRID_RADIUS => Color32::from_white_alpha(5),
+                        _ => Color32::TRANSPARENT,
+                    },
+                    Stroke::new(1.0, Color32::from_gray(100)),
+                ));
             }
         }
 
@@ -170,9 +199,9 @@ impl eframe::App for GridGameViewer {
                         .clicked()
                     {
                         if self.current_frame == self.frames.len() - 1 {
-                            let game = self.frames[self.current_frame];
+                            // let game = self.frames[self.current_frame];
                             // TODO
-                            self.frames.push(game);
+                            // self.frames.push(game);
                         }
                         self.current_frame += 1;
                     }
