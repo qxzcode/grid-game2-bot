@@ -4,7 +4,7 @@ mod util;
 use eframe::egui;
 use eframe::egui::{Color32, Pos2, Rounding, Stroke};
 use egui::epaint::QuadraticBezierShape;
-use egui::{pos2, vec2, Shape, Vec2, Frame};
+use egui::{pos2, vec2, Frame, Shape, Vec2};
 use game::GRID_RADIUS;
 use hex2d::{Coordinate, Direction, Spacing, Spin};
 use util::transforms::Transform;
@@ -64,11 +64,10 @@ impl GridGameViewer {
         Self::default()
     }
 
-    fn paint_game(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
-        let origin = Coordinate::new(0, 0);
-
+    /// Makes the letterboxing transform given the current camera parameters.
+    fn make_transform(&self, ui: &egui::Ui) -> Transform {
         let ui_rect = ui.max_rect();
-        let world_to_screen = Transform::new_letterboxed(
+        Transform::new_letterboxed(
             Pos2::new(
                 -GRID_WIDTH / 2.0 / self.zoom + self.camera.x,
                 GRID_HEIGHT / 2.0 / self.zoom + self.camera.y,
@@ -79,19 +78,29 @@ impl GridGameViewer {
             ),
             Pos2::new(ui_rect.left(), ui_rect.top()),
             Pos2::new(ui_rect.right(), ui_rect.bottom()),
-        );
-        let painter = ui.painter_at(ui_rect);
+        )
+    }
+
+    fn paint_game(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        let origin = Coordinate::new(0, 0);
 
         ctx.input(|i| {
             self.zoom *= (i.scroll_delta.y / 500.0).exp();
             self.zoom = self.zoom.clamp(1.0, 1.0e4);
             if i.pointer.is_decidedly_dragging() {
-                let px_scale = world_to_screen.map_dist(1.0);
+                let px_scale = self.make_transform(ui).map_dist(1.0);
                 self.camera.x -= i.pointer.delta().x / px_scale;
                 self.camera.y += i.pointer.delta().y / px_scale;
-                self.camera = self.camera.clamp(pos2(-GRID_WIDTH / 2.0, -GRID_HEIGHT / 2.0), pos2(GRID_WIDTH / 2.0, GRID_HEIGHT / 2.0));
+                self.camera = self.camera.clamp(
+                    pos2(-GRID_WIDTH / 2.0, -GRID_HEIGHT / 2.0),
+                    pos2(GRID_WIDTH / 2.0, GRID_HEIGHT / 2.0),
+                );
             }
         });
+
+        let ui_rect = ui.max_rect();
+        let world_to_screen = self.make_transform(ui);
+        let painter = ui.painter_at(ui_rect);
 
         self.pointer_pos = match ctx.pointer_latest_pos() {
             None => "".to_string(),
@@ -218,6 +227,8 @@ impl eframe::App for GridGameViewer {
                 });
             });
         });
-        egui::CentralPanel::default().frame(Frame::default().inner_margin(0.0)).show(ctx, |ui| self.paint_game(ctx, ui));
+        egui::CentralPanel::default()
+            .frame(Frame::default().inner_margin(0.0))
+            .show(ctx, |ui| self.paint_game(ctx, ui));
     }
 }
