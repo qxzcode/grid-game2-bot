@@ -90,7 +90,6 @@ impl GridGameViewer {
                 self.camera.y += i.pointer.delta().y / px_scale;
             }
         });
-        ctx.request_repaint();
 
         self.pointer_pos = match ctx.pointer_latest_pos() {
             None => "".to_string(),
