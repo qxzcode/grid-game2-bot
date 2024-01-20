@@ -1,12 +1,15 @@
 pub mod game;
 mod util;
 
+use std::collections::HashSet;
+
 use eframe::egui;
 use eframe::egui::{Color32, Pos2, Rounding, Stroke};
 use egui::epaint::QuadraticBezierShape;
 use egui::{pos2, vec2, Frame, Shape, Vec2};
 use game::GRID_RADIUS;
 use hex2d::{Coordinate, Direction, Spacing, Spin};
+use rand::seq::SliceRandom;
 use util::transforms::Transform;
 
 const SQRT_3: f32 = 1.7320508;
@@ -45,6 +48,8 @@ struct GridGameViewer {
     pointer_pos: String,
     zoom: f32,
     camera: Pos2,
+    draw_lines: bool,
+    highlight_edges: bool,
 }
 
 impl Default for GridGameViewer {
@@ -55,6 +60,8 @@ impl Default for GridGameViewer {
             pointer_pos: "".to_string(),
             zoom: 1.0,
             camera: pos2(0.0, 0.0),
+            draw_lines: true,
+            highlight_edges: true,
         }
     }
 }
@@ -109,11 +116,12 @@ impl GridGameViewer {
                 let tile: Coordinate<i32> =
                     Coordinate::from_pixel(pos.x, pos.y, Spacing::PointyTop(1.0));
                 format!(
-                    "({:.1}, {:.1}) Hexagon: ({}, {}, r={})",
+                    "({:.1}, {:.1}) Hexagon: (x={}, y={}, z={}, r={})",
                     pos.x,
                     pos.y,
                     tile.x,
                     tile.y,
+                    tile.z(),
                     tile.distance(origin),
                 )
             }
@@ -147,31 +155,79 @@ impl GridGameViewer {
                     tile_corners.to_vec(),
                     match r {
                         0 => Color32::from_rgba_unmultiplied(255, 128, 0, 15),
-                        GRID_RADIUS => Color32::from_white_alpha(5),
+                        GRID_RADIUS => Color32::WHITE.gamma_multiply(0.05),
                         _ => Color32::TRANSPARENT,
                     },
-                    Stroke::new(1.0, Color32::from_gray(100)),
+                    Stroke::new(0.5, Color32::from_gray(50)),
                 ));
             }
         }
 
-        let tile = Coordinate::new(1, -3);
-        let tile_center: Pos2 = tile.to_pixel(Spacing::PointyTop(1.0)).into();
-        let edge_midpoint = |edge_index| {
-            let c1 = tile_center + HEXAGON_CORNERS[edge_index];
-            let c2 = tile_center + HEXAGON_CORNERS[edge_index + 1];
-            world_to_screen.map_point(c1 + (c2 - c1) / 2.0)
-        };
-        painter.add(egui::Shape::QuadraticBezier(QuadraticBezierShape {
-            points: [
-                edge_midpoint(2),
-                world_to_screen.map_point(tile_center),
-                edge_midpoint(3),
-            ],
-            closed: false,
-            fill: Color32::TRANSPARENT,
-            stroke: Stroke::new(1.0, Color32::RED),
-        }));
+        let mut occupied_edges = HashSet::new();
+        for color in [Color32::RED, Color32::GREEN, Color32::YELLOW] {
+            let mut last_tile = Coordinate::new(10, -3);
+            let mut last_edge = None;
+            for _ in 0..100 {
+                // Get the next tile in the path.
+                let tile = *last_tile
+                    .neighbors()
+                    .choose(&mut rand::thread_rng())
+                    .unwrap();
+
+                let tile_center = |tile: Coordinate| tile.to_pixel(Spacing::PointyTop(1.0)).into();
+                let edge_endpoints = |edge_index| {
+                    let e1 = tile_center(tile) + HEXAGON_CORNERS[edge_index];
+                    let e2 = tile_center(tile) + HEXAGON_CORNERS[edge_index + 1];
+                    [e1, e2].map(|e| world_to_screen.map_point(e))
+                };
+
+                let [e1, e2] = edge_endpoints(match tile.direction_to_cw(last_tile).unwrap() {
+                    Direction::ZY => 0,
+                    Direction::XY => 1,
+                    Direction::XZ => 2,
+                    Direction::YZ => 3,
+                    Direction::YX => 4,
+                    Direction::ZX => 5,
+                });
+                let edge = e1 + (e2 - e1) / 2.0;
+                if last_edge == Some(edge)
+                    || !occupied_edges.insert((tile.min(last_tile), tile.max(last_tile)))
+                {
+                    // for debug, to prevent illegal random moves
+                    continue;
+                }
+                assert_ne!(last_edge, Some(edge)); // Verify that this isn't a 180deg turn.
+
+                if self.highlight_edges {
+                    // Redraw the hexagon edge to show that it is now off-limits.
+                    painter.line_segment([e1, e2], Stroke::new(1.0, Color32::WHITE));
+                }
+
+                if self.draw_lines {
+                    // Draw the curved segment of the player's line.
+                    if let Some(last_edge) = last_edge {
+                        painter.add(egui::Shape::QuadraticBezier(QuadraticBezierShape {
+                            points: [
+                                last_edge,
+                                world_to_screen.map_point(tile_center(last_tile)),
+                                edge,
+                            ],
+                            closed: false,
+                            fill: Color32::TRANSPARENT,
+                            stroke: Stroke::new(1.5, color.gamma_multiply(0.4)),
+                        }));
+                    }
+                }
+
+                last_tile = tile;
+                last_edge = Some(edge);
+            }
+
+            // Draw the end-of-line marker.
+            if let Some(last_edge) = last_edge {
+                painter.circle_filled(last_edge, world_to_screen.map_dist(0.25), color);
+            }
+        }
     }
 }
 
@@ -221,6 +277,11 @@ impl eframe::App for GridGameViewer {
                     {
                         todo!();
                     }
+
+                    ui.separator();
+
+                    ui.checkbox(&mut self.draw_lines, "Draw lines");
+                    ui.checkbox(&mut self.highlight_edges, "Highlight edges");
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(&self.pointer_pos);

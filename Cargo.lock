@@ -1255,6 +1255,7 @@ dependencies = [
  "egui",
  "hex2d",
  "nonmax",
+ "rand",
 ]
 
 [[package]]

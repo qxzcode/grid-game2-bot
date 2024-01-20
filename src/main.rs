@@ -8,7 +8,7 @@ fn main() {
     let origin = Coordinate::new(0, 0);
 
     let mut total = 0;
-    for r in 0..=50 {
+    for r in 0..=40 {
         println!();
         println!("r = {r}:");
         let ring = origin.ring_iter(r, Spin::CW(Direction::XY));
