@@ -3,4 +3,20 @@ name = "grid-game2-bot"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "main"
+path = "src/main.rs"
+
+[[bin]]
+name = "viewer"
+path = "src/viewer.rs"
+
+#[[bin]]
+#name = "versus"
+#path = "src/versus.rs"
+
 [dependencies]
+eframe = "0.25.0"
+egui = "0.25.0"
+hex2d = "1.1.0"
+nonmax = "0.5.5"
